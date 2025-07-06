@@ -1,0 +1,41 @@
+{
+  "name": "financial-predictor-app",
+  "version": "1.0.0",
+  "workspaces": {
+    "apps/web": {
+      "name": "web",
+      "projectType": "application",
+      "tags": ["app", "frontend", "react", "nextjs"]
+    },
+    "apps/api": {
+      "name": "api", 
+      "projectType": "application",
+      "tags": ["app", "backend", "fastapi", "python"]
+    },
+    "apps/ml-service": {
+      "name": "ml-service",
+      "projectType": "application", 
+      "tags": ["app", "ml", "python", "vertex-ai"]
+    },
+    "packages/ui": {
+      "name": "ui",
+      "projectType": "library",
+      "tags": ["shared", "ui", "react", "typescript"]
+    },
+    "packages/utils": {
+      "name": "utils",
+      "projectType": "library",
+      "tags": ["shared", "utils", "typescript"]
+    },
+    "packages/types": {
+      "name": "types",
+      "projectType": "library",
+      "tags": ["shared", "types", "typescript"]
+    },
+    "packages/config": {
+      "name": "config",
+      "projectType": "library",
+      "tags": ["shared", "config", "typescript"]
+    }
+  }
+}

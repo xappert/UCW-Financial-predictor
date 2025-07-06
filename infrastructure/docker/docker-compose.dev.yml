@@ -1,0 +1,71 @@
+# Docker Compose for Financial Predictor Application (Development)
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: financial-predictor-postgres-dev
+    environment:
+      POSTGRES_DB: financial_predictor_dev
+      POSTGRES_USER: dev_user
+      POSTGRES_PASSWORD: dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    networks:
+      - financial-predictor-dev-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: financial-predictor-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    networks:
+      - financial-predictor-dev-network
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+
+  # Database administration tool
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: financial-predictor-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@financialpredictor.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - financial-predictor-dev-network
+
+  # Redis administration tool
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: financial-predictor-redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - financial-predictor-dev-network
+
+volumes:
+  postgres_dev_data:
+    driver: local
+  redis_dev_data:
+    driver: local
+
+networks:
+  financial-predictor-dev-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

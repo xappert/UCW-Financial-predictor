@@ -1,0 +1,266 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PROJECT_ID: ${{ secrets.PROJECT_ID }}
+  PROJECT_NAME: ${{ secrets.PROJECT_NAME }}
+  PROJECT_NUMBER: ${{ secrets.PROJECT_NUMBER }}
+  REGISTRY: gcr.io
+  REGION: us-central1
+
+jobs:
+  # Test and Build Job
+  test-and-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api, web, ml-service]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python (for API and ML service)
+        if: matrix.service == 'api' || matrix.service == 'ml-service'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js (for Web)
+        if: matrix.service == 'web'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install Python dependencies (API)
+        if: matrix.service == 'api'
+        run: |
+          cd apps/api
+          pip install poetry
+          poetry install
+
+      - name: Install Python dependencies (ML Service)
+        if: matrix.service == 'ml-service'
+        run: |
+          cd apps/ml-service
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Install Node.js dependencies (Web)
+        if: matrix.service == 'web'
+        run: |
+          cd apps/web
+          npm ci
+
+      - name: Run tests (API)
+        if: matrix.service == 'api'
+        run: |
+          cd apps/api
+          poetry run pytest tests/ -v --cov=app --cov-report=xml
+
+      - name: Run tests (Web)
+        if: matrix.service == 'web'
+        run: |
+          cd apps/web
+          npm run lint
+          npm run type-check
+          npm run test
+
+      - name: Security scan (API)
+        if: matrix.service == 'api'
+        run: |
+          cd apps/api
+          poetry run bandit -r app/ -f json -o bandit-report.json
+          poetry run safety check --json --output safety-report.json
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-${{ matrix.service }}
+          path: |
+            apps/${{ matrix.service }}/coverage.xml
+            apps/${{ matrix.service }}/*-report.json
+
+  # Deploy to Development
+  deploy-dev:
+    if: github.ref == 'refs/heads/develop'
+    needs: test-and-build
+    runs-on: ubuntu-latest
+    environment: development
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker
+
+      - name: Build and push images
+        run: |
+          # Build API image
+          docker build -t $REGISTRY/$PROJECT_ID/$PROJECT_NAME-api:$GITHUB_SHA \
+            -t $REGISTRY/$PROJECT_ID/$PROJECT_NAME-api:latest \
+            -f apps/api/Dockerfile ./apps/api
+          
+          # Build Web image
+          docker build -t $REGISTRY/$PROJECT_ID/$PROJECT_NAME-web:$GITHUB_SHA \
+            -t $REGISTRY/$PROJECT_ID/$PROJECT_NAME-web:latest \
+            -f apps/web/Dockerfile ./apps/web \
+            --build-arg NEXT_PUBLIC_API_URL=https://dev-api.financialpredictor.com
+          
+          # Build ML Service image
+          docker build -t $REGISTRY/$PROJECT_ID/$PROJECT_NAME-ml:$GITHUB_SHA \
+            -t $REGISTRY/$PROJECT_ID/$PROJECT_NAME-ml:latest \
+            -f apps/ml-service/Dockerfile ./apps/ml-service
+          
+          # Push images
+          docker push $REGISTRY/$PROJECT_ID/$PROJECT_NAME-api:$GITHUB_SHA
+          docker push $REGISTRY/$PROJECT_ID/$PROJECT_NAME-web:$GITHUB_SHA
+          docker push $REGISTRY/$PROJECT_ID/$PROJECT_NAME-ml:$GITHUB_SHA
+
+      - name: Deploy to Cloud Run (Development)
+        run: |
+          # Deploy API
+          gcloud run deploy $PROJECT_NAME-api-dev \
+            --image $REGISTRY/$PROJECT_ID/$PROJECT_NAME-api:$GITHUB_SHA \
+            --region $REGION \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars ENVIRONMENT=development \
+            --memory 2Gi \
+            --cpu 2 \
+            --min-instances 0 \
+            --max-instances 3
+          
+          # Deploy Web
+          gcloud run deploy $PROJECT_NAME-web-dev \
+            --image $REGISTRY/$PROJECT_ID/$PROJECT_NAME-web:$GITHUB_SHA \
+            --region $REGION \
+            --platform managed \
+            --allow-unauthenticated \
+            --memory 1Gi \
+            --cpu 1 \
+            --min-instances 0 \
+            --max-instances 3
+          
+          # Deploy ML Service
+          gcloud run deploy $PROJECT_NAME-ml-dev \
+            --image $REGISTRY/$PROJECT_ID/$PROJECT_NAME-ml:$GITHUB_SHA \
+            --region $REGION \
+            --platform managed \
+            --no-allow-unauthenticated \
+            --memory 4Gi \
+            --cpu 2 \
+            --min-instances 0 \
+            --max-instances 2
+
+  # Deploy to Production
+  deploy-prod:
+    if: github.ref == 'refs/heads/main'
+    needs: test-and-build
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker
+
+      - name: Build and push images
+        run: |
+          # Build API image
+          docker build -t $REGISTRY/$PROJECT_ID/$PROJECT_NAME-api:$GITHUB_SHA \
+            -t $REGISTRY/$PROJECT_ID/$PROJECT_NAME-api:prod-latest \
+            -f apps/api/Dockerfile ./apps/api
+          
+          # Build Web image
+          docker build -t $REGISTRY/$PROJECT_ID/$PROJECT_NAME-web:$GITHUB_SHA \
+            -t $REGISTRY/$PROJECT_ID/$PROJECT_NAME-web:prod-latest \
+            -f apps/web/Dockerfile ./apps/web \
+            --build-arg NEXT_PUBLIC_API_URL=https://api.financialpredictor.com
+          
+          # Build ML Service image
+          docker build -t $REGISTRY/$PROJECT_ID/$PROJECT_NAME-ml:$GITHUB_SHA \
+            -t $REGISTRY/$PROJECT_ID/$PROJECT_NAME-ml:prod-latest \
+            -f apps/ml-service/Dockerfile ./apps/ml-service
+          
+          # Push images
+          docker push $REGISTRY/$PROJECT_ID/$PROJECT_NAME-api:$GITHUB_SHA
+          docker push $REGISTRY/$PROJECT_ID/$PROJECT_NAME-web:$GITHUB_SHA
+          docker push $REGISTRY/$PROJECT_ID/$PROJECT_NAME-ml:$GITHUB_SHA
+
+      - name: Deploy to Cloud Run (Production)
+        run: |
+          # Deploy API with blue-green strategy
+          gcloud run deploy $PROJECT_NAME-api \
+            --image $REGISTRY/$PROJECT_ID/$PROJECT_NAME-api:$GITHUB_SHA \
+            --region $REGION \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars ENVIRONMENT=production \
+            --memory 4Gi \
+            --cpu 2 \
+            --min-instances 2 \
+            --max-instances 20 \
+            --no-traffic
+          
+          # Get new revision name
+          NEW_REVISION=$(gcloud run revisions list --service=$PROJECT_NAME-api --region=$REGION --limit=1 --format="value(metadata.name)")
+          
+          # Gradually shift traffic
+          gcloud run services update-traffic $PROJECT_NAME-api \
+            --region=$REGION \
+            --to-revisions $NEW_REVISION=10
+          
+          # Wait and monitor
+          sleep 300
+          
+          # Complete traffic shift if healthy
+          gcloud run services update-traffic $PROJECT_NAME-api \
+            --region=$REGION \
+            --to-revisions $NEW_REVISION=100
+
+      - name: Run database migrations
+        run: |
+          API_URL=$(gcloud run services describe $PROJECT_NAME-api --region=$REGION --format="value(status.url)")
+          curl -X POST "$API_URL/admin/migrate" \
+            -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+            -H "Content-Type: application/json"
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "✅ Production deployment successful!"
+          echo "API URL: $(gcloud run services describe $PROJECT_NAME-api --region=$REGION --format='value(status.url)')"
+          echo "Web URL: $(gcloud run services describe $PROJECT_NAME-web --region=$REGION --format='value(status.url)')"
+
+      - name: Notify deployment failure
+        if: failure()
+        run: |
+          echo "❌ Production deployment failed!"
+          # Here you could add Slack/email notifications

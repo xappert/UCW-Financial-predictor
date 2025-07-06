@@ -1,0 +1,7 @@
+# Development Environment Variables Example
+# Copy this file to terraform.tfvars and fill in your values
+
+project_id   = "ucw-financial-predictor"
+project_name = "UCW-financial-predictor"
+region       = "us-central1"
+zone         = "us-central1-a"

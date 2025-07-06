@@ -1,0 +1,26 @@
+# Production Environment Variables Example
+# Copy this file to terraform.tfvars and fill in your values
+
+project_id   = "ucw-financial-predictor"
+project_name = "UCW-financial-predictor"
+region       = "us-central1"
+zone         = "us-central1-a"
+
+# Production-specific configurations
+db_tier              = "db-custom-2-7680"
+db_availability_type = "REGIONAL"
+redis_memory_size    = 4
+redis_tier          = "STANDARD_HA"
+
+# Scaling configuration
+min_instances = 2
+max_instances = 20
+
+# Domain configuration - Using xappert.ca subdirectory
+# No custom domain purchase required for this proof of concept
+# Production URL: https://www.xappert.ca/financial-predictor
+domain_name = "xappert.ca"
+ssl_certificate_domains = ["xappert.ca", "www.xappert.ca"]
+
+# Budget configuration
+budget_amount = 1000

@@ -51,14 +51,6 @@ resource "google_project_iam_binding" "api_sql_client" {
   ]
 }
 
-resource "google_project_iam_binding" "api_secret_accessor" {
-  project = var.project_id
-  role    = "roles/secretmanager.secretAccessor"
-  members = [
-    "serviceAccount:${google_service_account.api.email}"
-  ]
-}
-
 resource "google_project_iam_binding" "api_pubsub_publisher" {
   project = var.project_id
   role    = "roles/pubsub.publisher"
@@ -213,7 +205,6 @@ resource "google_project_iam_custom_role" "api_service_role" {
   
   permissions = [
     "cloudsql.instances.connect",
-    "secretmanager.versions.access",
     "pubsub.messages.publish",
     "cloudtasks.tasks.create",
     "monitoring.metricDescriptors.create",
@@ -240,7 +231,6 @@ resource "google_project_iam_custom_role" "ml_service_role" {
     "storage.objects.get",
     "storage.objects.create",
     "storage.objects.delete",
-    "secretmanager.versions.access",
     "monitoring.metricDescriptors.create",
     "monitoring.timeSeries.create",
     "logging.logEntries.create"
